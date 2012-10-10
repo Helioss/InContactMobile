@@ -1,0 +1,397 @@
+/*Script for functionality of Whiteboard
+ *Julio 2012
+ **/
+var colorTip = "black";
+var drawnTo = new Array();
+var lineTo = new Array();
+var tool = "pencil";
+
+function setColorTip(color){
+    this.colorTip = color;
+}
+
+var CanvasDrawr = function(isNew) {
+    // grab canvas element
+    var options = core.canvasOptions;
+    if(isNew){
+        var canvas = document.getElementById(options.id);
+    }
+    else{
+        canvas = options.id;
+    }
+
+    ctxt = options.ctxt;
+    //canvas.width = (window.innerWidth * 90)/100;
+    //canvas.height = (window.innerHeight * 70)/100;
+    var clsBtn = document.getElementById("clean");
+
+    // set props from options, but the defaults are for the cool kids
+    ctxt.lineWidth = options.size || Math.ceil(Math.random() * 35);
+    ctxt.lineCap = options.lineCap || "round"; //['butt','round','square']
+
+    var moveToStanza = new Array(); //Variable para la recoleccion de coordenadas durante el movimineto, las cuales seran enviadas en una stanza
+    var lines = [,,];
+    //var offset = $(canvas).offset();
+    var offset = {left:15, top:57};
+    function setOptions(){};
+    var self = {
+        //bind click events
+        init: function() {
+            //alert("Width: "+window.innerWidth + ", Height: " + window.outerHeight);
+            if(isNew){
+                ctxt.fillStyle = "white";
+                ctxt.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+            //Defining Listeners
+            canvas.addEventListener('touchstart', self.preDraw, false);
+            canvas.addEventListener('touchmove', self.draw, false);
+            //canvas.addEventListener('touchend', self.getCoordinates, false);
+            canvas.addEventListener('touchend', self.paintLine, false);
+            clsBtn.addEventListener('click', self.clean, false);
+        },
+
+        preDraw: function(event) {
+            //console.log(offset.left + ", " + offset.top);
+            $.each(event.touches, function(i, touch) {
+                var id = touch.identifier;
+                //console.log("preDraw "+id + ", Xi: " + (this.pageX-offset.left));
+                moveToStanza[id] = "draw|"+colorTip+","+ctxt.lineWidth+"|";
+                lines[id] = {x: this.pageX - offset.left, 
+                             y: this.pageY - offset.top, 
+                             color: colorTip};
+            });
+            event.preventDefault();
+        },
+
+        draw: function(event) {
+            if(tool == "pencil"){
+                $.each(event.touches, function(i, touch) {
+                    var id = touch.identifier,
+                        moveX = this.pageX - offset.left - lines[id].x,
+                        moveY = this.pageY - offset.top - lines[id].y;
+
+                    var ret = self.move(id, moveX, moveY);
+                    moveToStanza[id] += lines[id].x + "," + lines[id].y + "|" + (lines[id].x + moveX) + "," + (lines[id].y + moveY) + "|";
+                    lines[id].x = ret.x;
+                    lines[id].y = ret.y;
+                });
+            }
+            event.preventDefault();
+        },
+
+        move: function(i, changeX, changeY) {
+            if(tool == "pencil"){
+                ctxt.strokeStyle = lines[i].color;
+                ctxt.beginPath();
+                ctxt.moveTo(lines[i].x, lines[i].y);
+                ctxt.lineTo(lines[i].x + changeX, lines[i].y + changeY);
+                ctxt.stroke();
+                ctxt.closePath();
+                return {x: lines[i].x + changeX, y: lines[i].y + changeY};
+            }
+        },
+        
+        paintLine: function(event){
+            var route="";
+            if(tool == "line"){
+                $.each(event.changedTouches, function(i, touch){
+                var id = touch.identifier;
+                ctxt.strokeStyle = lines[id].color;
+                ctxt.beginPath();
+                ctxt.moveTo(lines[id].x, lines[id].y);
+                ctxt.lineTo(this.pageX - offset.left, this.pageY - offset.top);
+                //console.log("paintLine" + id + ", Xi: " + lines[id].x + ", Yi: " + lines[id].y + ", Xf: " + (this.pageX - offset.left) + ", Yf: " + (this.pageY - offset.top));
+                route = "draw|"+colorTip+","+ctxt.lineWidth+"|" + lines[id].x + "," + lines[id].y + "|" + (this.pageX - offset.left) + "," + (this.pageY - offset.top);
+                //console.log(route);
+            });
+                ctxt.stroke();
+                ctxt.closePath();
+            }
+            else if(tool == "pencil"){
+                $.each(event.changedTouches, function(i, touch){
+                    var id = touch.identifier;
+                    //console.log("ID: " + id + " i: " + i + " , arr: " + moveToStanza[id]);
+                    route = moveToStanza[id].substr(0, moveToStanza[id].length-1);
+                    moveToStanza.splice(id, 1);
+                });
+            }
+            core.sendStroke(route);
+        },
+      
+        clean: function(){
+            //$("#testImg").html("");
+            ctxt.fillStyle = "white";
+            ctxt.fillRect(0, 0, canvas.width, canvas.height);
+            $("#optionsDialog").dialog("close");
+        },
+        
+        saveImg: function(){
+            var img_data = canvas.toDataURL();
+
+            var img = new Image();
+            $(img).load(function(){
+                $("#testImg").html("");
+                $(img).appendTo("#testImg");
+            });
+            img.src = img_data;
+            $("#optionsDialog").dialog("close");
+        },
+        
+        drawPic: function(src){
+            var pic = new Image();
+            pic.src = src;
+            pic.onload = function(){
+                ctxt.drawImage(pic, 0, 0);
+            };
+        }
+    };
+    return self.init();
+};
+
+
+
+$(function(){
+    $("#initWhiteboard").click(function(ev){
+        $timeS = ev.timeStamp;
+        $currentCanvas = core.getCanvasDivForJID(core.current_user);
+        //msg, se presenta cuando un usuario del grupo intenta iniciar una pizarra y estÃ¡ ya ha sido iniciada por otro usurio y esta actualmente activa.
+        if($currentCanvas.invited){
+            $(document).trigger('showDialogNotif', {clase:"error",html:"<div class='notification error'>Existe una pizarra iniciada en el grupo.</div>"});
+            return;
+        }
+        if($currentCanvas.isNew){
+            $from = core.connection.jid;
+            $to = core.current_user;
+            $type = $to.indexOf("@chat.")>-1?"groupchat":"chat";
+            if($type == "groupchat"){
+                $("#BtnBackCanvas").html("Terminar");
+                $("#backChat").attr("href", "");
+                $("#saveSend").css('display', 'none');
+            }
+            else{
+                $("#BtnBackCanvas").html("Chat");
+                $("#backChat").attr("href", "#chat");
+                $("#saveSend").css('display', '');
+            }
+            var msg = $msg({to:$to, from:$from, type: $type, canvas: "canvas"}).c('body').t(" ").up().c("time").t(core.getTime()).up().c('request',{xmlns:'urn:xmpp:receipts',timestamp:$timeS}).tree();
+            core.connection.send(msg);
+            $accesCanvas = "He inicializado la pizarra <img src='images/icon_blackboard.png' width='40' height='40' />";
+            core.log(core.current_user,"<p><b> Yo: </b>" + $accesCanvas + "</p>","send",core.getTime(), $timeS, false);
+            $(document).trigger("printChatList", {msg:"Pizarra", to: $to, time: core.getTime(), notif: false, send: true});
+            $("#dinamicLinkPage").attr("href","#whiteboard").trigger('click');
+            $($currentCanvas.div).css('display','');
+        }
+        if($currentCanvas.exist){
+            $("#BtnBackCanvas").html("Chat");
+            $("#dinamicLinkPage").attr("href","#whiteboard").trigger('click');
+            $($currentCanvas.div).css('display','');
+        }
+    });
+    
+    $("#backChat").click(function(){
+        $txt = $("#BtnBackCanvas").text();
+        if($txt == "Terminar"){
+            console.log("Terminando:");
+            $currentCanvas = core.getCanvasDivForJID(core.current_user);
+            var dataURL;
+            setTimeout(function(){
+                $("#saveSend").css('display', '');
+                plugins.canvas.toDataURL($currentCanvas, "image/png", function(arg){
+                    dataURL = arg.data;
+                    console.log(dataURL);
+                    $currentCanvas.ctxt.fillStyle = "white";
+                    $currentCanvas.ctxt.fillRect(0, 0, $currentCanvas.width, $currentCanvas.height);
+
+                    $.blockUI({message: '<h3><img src="images/loading42.gif" width="25px" heigth="25px" /> Procesando... </h3>'});
+                    //Funcion para realizar el guardado del canvas
+                    $.ajax({
+                        type: "POST",
+                        url: "php/save_canvas.php",
+                        data: {transfer:dataURL},
+                        cache: false,
+                        dataType: "json",
+                        complete: function(data){
+                            var decode_json = eval("(" + data.responseText + ")");
+                            $src = decode_json.canvasDone;
+                            var msg = "Imagen final: <a href='#view_img'onclick='core.downFile(\"" + $src + "\","+true+","+ true+");'><img width='35px' heigth='35px' class='avatarIcon' src='"+$src+"'/></a>";
+                            core.log(core.current_user,"<p><b>yo: </b>" + msg + "</p>","send",core.getTime(), "",false);
+                            route = "endCanvasGroup|"+$src;
+                            core.sendStroke(route);
+                            $("#"+$currentCanvas.id).parent().remove();
+                            core.canvasForGroup.splice(core.current_user, 1);
+                            $(document).ajaxStop($.unblockUI);
+                            $("#dinamicLinkPage").attr("href","#chat").trigger('click');
+                        }
+                    });
+                },function(arg){
+                    console.log("Fail" + arg);
+                });
+            },1000);
+            
+             /*
+            $isGroup = core.current_user.indexOf("@chat.")>-1?true:false;
+            $currentCanvas = core.getCanvasDivForJID(core.current_user);
+            if($isGroup && !$currentCanvas.invited){
+               var URI = $currentCanvas.toDataURL();
+                console.log(URI);
+                $.blockUI({message: '<h3><img src="images/loading42.gif" width="25px" heigth="25px" /> Procesando... </h3>'}); 
+                //Funcion para realizar el guardado del canvas
+                $.ajax({
+                    type: "POST",
+                    url: "http://" + config.SERV + "/" + config.DOMAIN + "/php/save_canvas.php",
+                    data: {transfer:URI},
+                    cache: false,
+                    dataType: "json",
+                    complete: function(data){
+                        console.log(data);
+                        var decode_json = eval("(" + data.responseText + ")");
+                        $src = decode_json.canvasDone;
+                        var msg = "Imagen final: <a href='#view_img'onclick='core.downFile(\"" + $src + "\","+true+","+ true+");'><img width='35px' heigth='35px' class='avatarIcon' src='"+$src+"'/></a>";
+                        core.log(core.current_user,"<p><b>yo: </b>" + msg + "</p>","send",core.getTime(), "",false);
+                        //$("#headerCanvas").children("a").eq(0).remove();
+
+                        route = "endCanvasGroup|"+$src;
+                        core.sendStroke(route);
+                        $("#"+$currentCanvas.id).parent().remove();
+                        core.canvasForGroup.splice(core.current_user, 1);
+                        $(document).ajaxStop($.unblockUI);
+                    }
+                });
+            }
+            $($currentCanvas.div).css('display','none');
+            $("#canvasFooter").css('display','');
+            $("#saveSend").css('display','');
+            console.log($txt);
+            */
+        }
+        else{
+            $currentCanvas = core.getOnlyJID(core.current_user);
+            $("#canvas"+$currentCanvas).css('display','none');
+            $("#canvasFooter").css('display','');
+        }
+    });
+    
+    $("#saveSend").click(function(ev){
+        $("#optionsDialog").dialog("close");
+        //$currentCanvas = core.getOnlyJID(core.current_user);
+        $currentCanvas = core.getCanvasDivForJID(core.current_user);
+        //var dataURL = $currentCanvas.toDataURL();
+        var dataURL;
+        setTimeout(function(){
+            console.log($currentCanvas.offsetLeft);
+            console.log($currentCanvas.offsetTop);
+            plugins.canvas.toDataURL($currentCanvas, "image/png", function(arg){
+                dataURL = arg.data;
+                console.log(dataURL);
+                $currentCanvas.ctxt.fillStyle = "white";
+                $currentCanvas.ctxt.fillRect(0, 0, $currentCanvas.width, $currentCanvas.height);
+
+                $.blockUI({message: '<h3><img src="images/loading42.gif" width="25px" heigth="25px" /> Procesando... </h3>'});
+                //Funcion para realizar el guardado del canvas
+                $.ajax({
+                    type: "POST",
+                    url: "php/save_canvas.php",
+                    data: {transfer:dataURL},
+                    cache: false,
+                    dataType: "json",
+                    complete: function(data){
+                        var decode_json = eval("(" + data.responseText + ")");
+                        $src = decode_json.canvasDone;
+                        var msg = "Imagen final: <a href='#view_img'onclick='core.downFile(\"" + $src + "\","+true+","+ true+");'><img width='35px' heigth='35px' class='avatarIcon' src='"+$src+"'/></a>";
+                        core.log(core.current_user,"<p><b>yo: </b>" + msg + "</p>","send",core.getTime(), "",false);
+                        route = "showEndCanvas|"+$src;
+                        core.sendStroke(route);
+                        $(document).ajaxStop($.unblockUI);
+                    }
+                });
+            },function(arg){
+                console.log("Fail" + arg);
+            });
+        },1000);
+        /**/
+    });
+
+    $("#colorPoint").bind("change", function(event){
+        setColorTip(event.target.value);
+    });
+
+
+    $("#colorWidth").live("change", function(event){
+        //ctxt.lineWidth = event.target.value;
+        ctxt.lineWidth = $(this).val();
+    });
+
+
+    $("#colorBack").bind("change", function(event){
+        rgba = "rgba(" + event.target.value + ",0.2)";
+        ctxt.fillStyle = rgba;
+        //context.globalAlpha=0.5; // Variable golbal de opacidad
+        ctxt.fillRect(0, 0, 270, 250);
+        route = "colorBack|"+rgba;
+        core.sendStroke(route);
+    });
+    
+    
+    $("#imgInsert").bind("change", function(ev){
+        var imgStatic = new Image();
+        imgStatic.src = "images/"+ev.target.value+".jpg";
+        imgStatic.onload = function() {
+            ctxt.drawImage(imgStatic, 0, 0, 270,250);
+            //ctxt.drawImage(imgStatic, 0, 0, imgStatic.width, imgStatic.heigth, 0, 0, 270, 250);
+        };
+    });
+    
+    $("#imgCanvasBackground_cam").bind("click", function(){
+        Cordova.captureImage("bkgCanvas_cam");
+    });
+
+    $("#imgCanvasBackground_gallery").bind("click", function(){
+        Cordova.getPhoto(Cordova.pictureSource.PHOTOLIBRARY, "bkgCanvas_cam");
+    });
+
+    $("#gray").bind("click", function(){
+        var drawing = ctxt.getImageData(0, 0, 270, 250);
+        var avg;
+        // skip 4 entries (1 px) at a time
+        for (var i = 0; i < drawing.data.length; i = i + 4) {
+        avg = (drawing.data[i] + drawing.data[i+1] + drawing.data[i+2]) / 3;
+        drawing.data[i] = drawing.data[i+1] = drawing.data[i+2] = avg;
+        }
+        ctxt.putImageData(drawing, 0, 0);
+        $("#efectsDialog").dialog("close");
+        stroke = "efect|gray";
+        core.sendStroke(stroke);
+    });
+
+    $("#negative").bind("click", function(){
+        var drawing = ctxt.getImageData(0, 0, 270, 250);
+        var avg;
+        // skip 4 entries (1 px) at a time
+        for (var i = 0; i < drawing.data.length; i = i + 4) {
+            drawing.data[i] = 255 - drawing.data[i]; // invert red
+            drawing.data[i+1] = 255 - drawing.data[i+1]; // invert green
+            drawing.data[i+2] = 255 - drawing.data[i+2]; // invert blue
+        }
+        ctxt.putImageData(drawing, 0, 0);
+        $("#efectsDialog").dialog("close");
+        stroke = "efect|negative";
+        core.sendStroke(stroke);
+    });
+
+    $("#drawingType").bind("change", function(){
+        tool = $("#drawingType").val();
+    });
+    
+    $(".select-color").click(function(){
+        var color = $(this).attr('id');
+        console.log(color);
+        setColorTip(color);
+    });
+
+    $(".bkg_color").click(function(){
+        var color = $(this).attr('id');
+        $(".ui-page").css("background", color);
+    });
+    
+});
